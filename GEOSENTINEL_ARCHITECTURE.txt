@@ -1,0 +1,500 @@
+================================================================================
+GEOSENTINEL — THERMAL INTELLIGENCE FOR MINING & ENVIRONMENTAL RISK
+COMPLETE SYSTEM ARCHITECTURE, DATA SPECIFICATION & DEVELOPMENT ROADMAP (MVP)
+================================================================================
+
+TABLE OF CONTENTS
+-----------------
+1. Executive Concept & Problem Statement
+2. End-to-End Computational Workflow & ASCII Pipeline Diagram
+3. Multi-Sensor Data Architecture (Sentinel-2 vs. Landsat 8/9 vs. FortyGuard)
+4. Spatial Resolution Alignment Strategy (10m vs. 30m / 100m)
+5. Mathematical Formulations & Explainable Risk Scoring Engine
+6. Recommended Technology Stack & Selection Rationale
+7. Modular Environmental / FortyGuard Interface Specification
+8. Frontend Interactive Map & UX Design Requirements
+9. Project Directory & File Structure
+10. 6-Milestone Step-by-Step Development Roadmap
+11. Milestone Deliverables & Verification Checklist
+12. Real Data vs. Sample/Mock Data Matrix
+13. Minimum Hackathon Demo Requirements
+14. Scope Boundaries: Features Explicitly Excluded from MVP
+15. Architectural Summary: Changes, Invariants, and Guardrails
+
+
+================================================================================
+1. EXECUTIVE CONCEPT & PROBLEM STATEMENT
+================================================================================
+
+GeoSentinel is an AI-assisted geospatial intelligence platform designed to detect
+mining expansion, land-use changes, and vegetation disturbance, combining them
+with satellite thermal intelligence and microclimate environmental data to
+identify and prioritize high-risk zones.
+
+The Core Problem:
+Traditional environmental monitoring either focuses strictly on optical change
+detection (deforestation, bare ground) without understanding thermal impact, or
+displays raw satellite heatmaps without contextualizing where human disturbance
+is actually occurring.
+
+The Core Question Answered by GeoSentinel:
+"Where is the environmental risk highest, and where should ground investigation
+and inspection teams be prioritized first?"
+
+
+================================================================================
+2. END-TO-END COMPUTATIONAL WORKFLOW & ASCII PIPELINE DIAGRAM
+================================================================================
+
+The processing pipeline decouples optical vegetation disturbance detection from
+thermal infrared Land Surface Temperature (LST) analysis, unifying them at the
+risk scoring and zonal aggregation stage.
+
+ASCII PIPELINE DIAGRAM:
+
++-------------------------------------------------------------------------+
+|                           SENTINEL-2 (MSI)                              |
+|   T1 (Baseline Optical: B4 Red, B8 NIR)   T2 (Current Optical: B4, B8)  |
++------------------------------------+------------------------------------+
+                                     |
+                                     v
+                       +---------------------------+
+                       |   NDVI(T1) & NDVI(T2)     |
+                       |    (10m Resolution)       |
+                       +-------------+-------------+
+                                     |
+                                     v
+                       +---------------------------+
+                       |     dNDVI Difference      |
+                       | (Vegetation Loss Trigger) |
+                       +-------------+-------------+
+                                     |
+                                     v
+                       +---------------------------+
+                       | Vector Disturbance Zones  |
+                       |   (Contiguous Polygons)   |
+                       +-------------+-------------+
+                                     |
+              +----------------------+----------------------+
+              |                                             |
+              v                                             v
++---------------------------+                 +---------------------------+
+|      LANDSAT 8/9 LST      |                 |   FORTYGUARD / SAMPLE     |
+|   (TIRS Band 10 - 30m)    |                 | Hyperlocal Micro-Thermal  |
+|  Surface Temp - Baseline  |                 | Grid (Labeled Sample Data)|
++-------------+-------------+                 +-------------+-------------+
+              |                                             |
+              +----------------------+----------------------+
+                                     |
+                                     v
+                       +---------------------------+
+                       |   Zonal Thermal Anomaly   |
+                       |   (dT Mean/Max per Zone)  |
+                       +-------------+-------------+
+                                     |
+                                     v
+                       +---------------------------+
+                       |  Explainable Risk Engine  |
+                       |   Multi-Criteria (0-100)  |
+                       +-------------+-------------+
+                                     |
+                                     v
+                       +---------------------------+
+                       |   Classified GeoJSON      |
+                       | LOW / MED / HIGH / CRIT   |
+                       +-------------+-------------+
+                                     |
+                                     v
+                       +---------------------------+
+                       | Interactive Map & Ranked  |
+                       |   Prioritization Queue    |
+                       +---------------------------+
+
+
+================================================================================
+3. MULTI-SENSOR DATA ARCHITECTURE
+================================================================================
+
+IMPORTANT REMOTE SENSING DISTINCTION:
+Sentinel-2 does NOT have thermal infrared sensors. It operates across visible,
+near-infrared, and shortwave infrared (up to 2.2 microns). Land Surface
+Temperature (LST) requires thermal infrared (10.4 - 12.5 microns), which is
+captured by Landsat 8/9 TIRS or MODIS. GeoSentinel explicitly separates these
+sources.
+
+DATA SOURCES SPECIFICATION:
+
+1. SENTINEL-2 (Optical & Vegetation Disturbance)
+   - Source: European Space Agency (ESA) Copernicus Program
+   - Instrument: MultiSpectral Instrument (MSI), Level-2A (Surface Reflectance)
+   - Bands Required:
+     * Band 4 (Red): 665 nm central wavelength, 10m spatial resolution
+     * Band 8 (NIR - Near Infrared): 842 nm, 10m spatial resolution
+   - Temporal Requirements:
+     * T1 (Baseline date, e.g., 12-24 months prior, cloud cover < 5%)
+     * T2 (Current/recent monitoring date, cloud cover < 5%)
+   - Computed Products: NDVI(T1), NDVI(T2), dNDVI (Delta NDVI)
+
+2. LANDSAT 8 / 9 (Thermal Land Surface Temperature)
+   - Source: USGS / NASA Landsat Program
+   - Instrument: Thermal Infrared Sensor (TIRS-1 / TIRS-2)
+   - Product: Level-2 Surface Temperature (ST) Derived Product
+   - Bands / Channels: Band 10 (Thermal Infrared: 10.60 - 11.19 microns)
+   - Native Resolution: 100m (resampled to 30m in standard Level-2 products)
+   - Temporal Requirements: Acquired close to T2 date (same season/month)
+   - Computed Products:
+     * Current LST (degrees Celsius)
+     * Local Vegetated Baseline LST (degrees Celsius)
+     * Thermal Anomaly dT = LST_pixel - LST_baseline
+
+3. FORTYGUARD / HYPERLOCAL ENVIRONMENTAL LAYER (Pluggable Microclimate Layer)
+   - Source: FortyGuard Microclimate API or Sample Ground Temperature Grid
+   - Resolution: 1m to 10m hyperlocal spatial resolution
+   - Status in MVP: Clearly labeled as "Sample Environmental Grid"
+   - Role: Provides micro-temperature gradients within open pit areas,
+     tailings ponds, and machinery clusters.
+   - Modularity: Connected via a standardized TypeScript/Python adapter
+     interface so real API keys or data payloads can be swapped without
+     altering the core risk engine.
+
+
+================================================================================
+4. SPATIAL RESOLUTION ALIGNMENT STRATEGY (10m vs. 30m / 100m)
+================================================================================
+
+Challenge:
+Sentinel-2 optical pixels are 10m x 10m.
+Landsat thermal pixels are 30m x 30m (resampled from 100m).
+
+MVP Solution — The Zonal Statistics Aggregation Method:
+Rather than attempting complex pixel-level super-resolution or bilinear
+resampling (which can introduce spatial artifacts), GeoSentinel uses vector-based
+zonal aggregation:
+
+1. Step 1 (Vector Delineation at 10m):
+   High-change Sentinel-2 pixels (where dNDVI >= 0.25) are clustered and
+   converted into vector polygon boundaries using GeoPandas / Shapely.
+   This preserves crisp, accurate boundaries of actual excavated ground.
+
+2. Step 2 (Zonal Thermal Sampling at 30m):
+   For each delineated 10m polygon zone, compute the mean, maximum, and standard
+   deviation of the underlying Landsat 8/9 Surface Temperature raster.
+
+3. Step 3 (Hyperlocal Overlay if available):
+   If sample FortyGuard microclimate points fall within the polygon, compute the
+   micro-anomaly score to enrich the zone profile.
+
+
+================================================================================
+5. MATHEMATICAL FORMULATIONS & EXPLAINABLE RISK SCORING ENGINE
+================================================================================
+
+A. VEGETATION INDEX & LAND DISTURBANCE (Sentinel-2, 10m)
+
+   NDVI(T1) = (B8_T1 - B4_T1) / (B8_T1 + B4_T1)
+   NDVI(T2) = (B8_T2 - B4_T2) / (B8_T2 + B4_T2)
+
+   dNDVI = NDVI(T1) - NDVI(T2)
+
+   Interpretation:
+   * dNDVI >= +0.25  : Significant vegetation clearing / stripped overburden
+   * -0.10 <= dNDVI <= +0.10 : Stable land cover
+   * dNDVI < -0.10   : Regrowth / vegetation recovery
+
+B. THERMAL ANOMALY CALCULATION (Landsat 8/9 LST, 30m)
+
+   LST_baseline = Median LST of undisturbed surrounding canopy at T2
+   dT (Thermal Anomaly) = LST_zone_mean - LST_baseline
+
+   Interpretation:
+   * dT < +1.5 C     : Normal thermal response
+   * +1.5 C <= dT < +4.0 C : Moderate thermal increase (exposed soil/rock)
+   * dT >= +4.0 C    : High thermal anomaly (bare excavation, dark tailings, machinery)
+
+C. EXPLAINABLE ENVIRONMENTAL RISK SCORE FORMULA (0 - 100)
+
+   The Risk Score combines vegetation disturbance, thermal anomaly, and
+   contiguous impacted surface area into a single bounded score:
+
+   Risk Score = MIN(100,  50 * S_veg + 35 * S_thermal + 15 * S_area)
+
+   Where:
+
+   1. S_veg (Vegetation Disturbance Factor, range 0.0 to 1.0):
+      S_veg = CLAMP((dNDVI - 0.15) / (0.55 - 0.15), 0.0, 1.0)
+
+   2. S_thermal (Thermal Anomaly Factor, range 0.0 to 1.0):
+      S_thermal = CLAMP((dT - 1.5) / (7.5 - 1.5), 0.0, 1.0)
+
+   3. S_area (Spatial Footprint Factor, range 0.0 to 1.0):
+      S_area = CLAMP(Area_in_Hectares / 40.0, 0.0, 1.0)
+
+   (CLAMP(x, min, max) restricts x between min and max)
+
+D. RISK CLASSIFICATION TIERS
+
+   +----------------+------------+---------------------------------------------+
+   | Classification | Score Band | Operational Recommendation                  |
+   +----------------+------------+---------------------------------------------+
+   | CRITICAL       | 80 - 100   | Immediate Priority: Urgent field inspection |
+   | HIGH           | 60 - 79    | Priority 2: Scheduled investigation        |
+   | MEDIUM         | 35 - 59    | Priority 3: Monitor next satellite cycle    |
+   | LOW            | 0 - 34     | Baseline: Normal operational variation      |
+   +----------------+------------+---------------------------------------------+
+
+
+================================================================================
+6. RECOMMENDED TECHNOLOGY STACK & SELECTION RATIONALE
+================================================================================
+
++-------------------+----------------------------+-----------------------------+
+| Layer / Task      | Selected Technology        | Why It Is Selected          |
++-------------------+----------------------------+-----------------------------+
+| Raster Math       | Python, Rasterio, NumPy    | Standard for band algebra   |
+| Vectorization     | GeoPandas, Shapely         | Converts pixels to GeoJSON  |
+| Data Format       | Standard GeoJSON Feature   | Universal web map standard  |
+| Frontend UI       | React 18, Vite, TypeScript | Fast, typed, reliable       |
+| Styling           | Tailwind CSS               | Clean, modern, high-contrast|
+| Map Visualizer    | Leaflet / React-Leaflet    | Zero API keys, robust       |
+| Analytics Charts  | Recharts, Lucide Icons     | Clean data visualizations   |
++-------------------+----------------------------+-----------------------------+
+
+
+================================================================================
+7. MODULAR ENVIRONMENTAL / FORTYGUARD INTERFACE SPECIFICATION
+================================================================================
+
+To ensure zero vendor lock-in and prevent reliance on private APIs during the
+hackathon demo, the data contract separates data sources explicitly:
+
+TypeScript Data Interfaces:
+
+```typescript
+export type RiskTier = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+export interface ThermalSourceMeta {
+  sourceType: 'LANDSAT_8_TIRS' | 'FORTYGUARD_SAMPLE_GRID' | 'HYBRID';
+  resolutionMeters: number;
+  isSampleData: boolean; // Explicit label for hackathon transparency
+  unit: 'celsius';
+}
+
+export interface ZoneMetrics {
+  zoneId: string;
+  name: string;
+  riskScore: number; // 0 to 100
+  riskTier: RiskTier;
+  
+  // Sentinel-2 Optical Metrics (10m)
+  sentinel: {
+    baselineDate: string;
+    currentDate: string;
+    ndviBaseline: number;
+    ndviCurrent: number;
+    deltaNdvi: number;
+    areaHectares: number;
+  };
+  
+  // Landsat & Environmental Thermal Metrics
+  thermal: {
+    acquisitionDate: string;
+    currentLstC: number;
+    baselineLstC: number;
+    thermalAnomalyDeltaC: number;
+    sourceMeta: ThermalSourceMeta;
+  };
+  
+  // Plain-English Rationale
+  explanation: {
+    primaryDriver: string;
+    detailedSummary: string;
+    recommendedAction: string;
+  };
+}
+```
+
+
+================================================================================
+8. FRONTEND INTERACTIVE MAP & UX DESIGN REQUIREMENTS
+================================================================================
+
+A. Viewport Layout:
+   - Fixed, non-scrolling single-screen command center.
+   - Header Bar: Study Area Name, Bounding Box, Satellite Acquisition Dates (T1 vs T2),
+     and KPI Summary Badges (Total Monitored Area, Active Zones, Critical Alerts).
+   - Left / Right Panel: Ranked Prioritization Queue (sorted by Risk Score desc).
+   - Center / Main Stage: Leaflet Map with smooth interactive pan/zoom.
+   - Slide-out Inspector Drawer: Opens when a polygon or leaderboard item is clicked.
+
+B. Map Layer Switcher:
+   1. Base Maps: Satellite Imagery vs. Clean Carto Dark/Light.
+   2. Sentinel-2 T1 Baseline Optical Layer.
+   3. Sentinel-2 T2 Current Optical Layer.
+   4. Landsat 8/9 Thermal LST Heatmap Layer.
+   5. Risk Zone Polygons Layer (Color-coded: Red=Critical, Orange=High, Yellow=Medium, Green=Low).
+
+C. Zone Inspector Drawer Details:
+   - Overall Risk Score Badge with color-coded tier.
+   - Side-by-side Metric Cards:
+     * Vegetation Disturbance: dNDVI value, % drop, baseline vs current.
+     * Thermal Anomaly: Zone LST vs Baseline LST, delta T (degrees C).
+     * Disturbance Footprint: Area in Hectares and Square Kilometers.
+   - Visual Comparison Bar: Relative contribution of Vegetation Loss vs Thermal vs Area.
+   - Explainable Inspector Notes: Clear rationale of why this zone scored high.
+
+
+================================================================================
+9. PROJECT DIRECTORY & FILE STRUCTURE
+================================================================================
+
+geosentinel/
+├── backend/
+│   ├── data/
+│   │   ├── raw/
+│   │   │   ├── sentinel2_t1_b4_b8.tif   # 10m Optical Baseline
+│   │   │   ├── sentinel2_t2_b4_b8.tif   # 10m Optical Current
+│   │   │   └── landsat_t2_lst.tif       # 30m Surface Temp
+│   │   └── sample/
+│   │       └── fortyguard_sample.json   # Pluggable microclimate grid
+│   ├── pipeline.py                      # Rasterio dNDVI + Landsat LST zonal stats
+│   └── requirements.txt
+│
+└── src/ (React + Vite + TypeScript)
+    ├── data/
+    │   ├── studyAreaConfig.ts           # Study area coordinates and metadata
+    │   └── processedRiskZones.json      # Output GeoJSON with decoupled metrics
+    ├── components/
+    │   ├── Header.tsx                   # KPI summary and satellite metadata
+    │   ├── MapView.tsx                  # Leaflet map container
+    │   ├── LayerControl.tsx             # Layer switcher (Optical, Thermal, Risk)
+    │   ├── PrioritizationQueue.tsx      # Ranked actionable list of critical zones
+    │   ├── ZoneInspectorDrawer.tsx      # Breakdown modal: NDVI, LST, explanation
+    │   └── DataSourceBadge.tsx          # Real Landsat vs Sample FortyGuard tag
+    ├── types.ts                         # Complete TypeScript type definitions
+    ├── utils/
+    │   └── riskEngine.ts                # Client-side risk formula evaluator
+    ├── App.tsx                          # Core layout orchestrator
+    └── index.css                        # Tailwind CSS configuration
+
+
+================================================================================
+10. 6-MILESTONE STEP-BY-STEP DEVELOPMENT ROADMAP
+================================================================================
+
+MILESTONE 1: Study Area Selection & Data Schema Definition
+- Select 1 designated mining study area (e.g., Carajas Iron Mine, Brazil or
+  Kalgoorlie Super Pit, Australia).
+- Define bounding box, coordinate bounds, and acquisition timestamps for T1 & T2.
+- Establish the standardized TypeScript interfaces and GeoJSON schema.
+
+MILESTONE 2: Geospatial Pipeline & Change Math
+- Compute Sentinel-2 dNDVI from Band 4 and Band 8 GeoTIFFs.
+- Compute Landsat 8/9 Land Surface Temperature (LST) and local baseline.
+- Run zonal aggregation to attach mean LST and dT to disturbance polygons.
+
+MILESTONE 3: Explainable Risk Engine & GeoJSON Generation
+- Implement the 0-100 Multi-Criteria Risk Formula.
+- Classify all polygons into LOW, MEDIUM, HIGH, CRITICAL.
+- Generate formatted explanation text strings for each zone.
+- Output final validated `processedRiskZones.json`.
+
+MILESTONE 4: Interactive React + Leaflet Map Interface
+- Mount full-height Leaflet map in React.
+- Render styled GeoJSON polygons with custom SVG markers and risk colors.
+- Implement layer toggle (Optical T1, Optical T2, Thermal Anomaly, Risk Zones).
+
+MILESTONE 5: Prioritization Leaderboard & Inspector Drawer
+- Build the left-hand ranked prioritization queue.
+- Implement click-to-pan/zoom map synchronization.
+- Build the slide-out inspector drawer with metric cards and delta charts.
+
+MILESTONE 6: Transparency Badges & Hackathon Polish
+- Add explicit Data Source Badges (Real Landsat vs. Sample FortyGuard).
+- Add summary stats header (total hectares cleared, highest anomaly).
+- Finalize responsiveness, tooltips, and demo script.
+
+
+================================================================================
+11. MILESTONE DELIVERABLES & VERIFICATION CHECKLIST
+================================================================================
+
+| Milestone | Deliverable File / Asset        | Verification Test                      |
+|:----------|:--------------------------------|:---------------------------------------|
+| M1        | `src/data/studyAreaConfig.ts`   | Valid coordinates and date parameters  |
+| M2        | `backend/pipeline.py`           | Raster difference output matches math  |
+| M3        | `src/data/processedRiskZones.json`| Valid GeoJSON with score 0-100 in props|
+| M4        | `src/components/MapView.tsx`    | Polygons render in proper lat/long     |
+| M5        | `src/components/PrioritizationQueue.tsx` | Ranked in descending score order |
+| M6        | Complete Application            | Clean interaction with zero errors     |
+
+
+================================================================================
+12. REAL DATA VS. SAMPLE/MOCK DATA MATRIX
+================================================================================
+
++-------------------------------------+-----------------+---------------------+
+| Component                           | MVP Status      | Production Target   |
++-------------------------------------+-----------------+---------------------+
+| Sentinel-2 B4 (Red) & B8 (NIR)      | REAL DATA       | Automated STAC API  |
+| NDVI Baseline & Current             | REAL DATA       | On-demand compute   |
+| Landsat 8/9 Band 10 (TIRS / LST)    | REAL DATA       | USGS M2M API        |
+| Thermal Anomaly (dT)                | REAL DATA       | Cloud Zonal Stats   |
+| FortyGuard Microclimate Grid        | SAMPLE DATA     | FortyGuard Live API |
+| Multi-Criteria Risk Score Formula   | REAL FORMULA    | Calibrated ML Model |
++-------------------------------------+-----------------+---------------------+
+
+
+================================================================================
+13. MINIMUM HACKATHON DEMO REQUIREMENTS
+================================================================================
+
+1. A clear header answering WHAT and WHERE (Study Area, Date Range, Satellite Sensors).
+2. An interactive map with sharp, color-coded polygons for risk zones.
+3. An action-oriented prioritization list answering "Where do we go first?".
+4. A zone inspection panel proving the score is NOT a black box (shows dNDVI, LST, dT, area).
+5. A layer switcher allowing judges to see Optical Baseline vs Current vs Thermal.
+6. Explicit, honest data source labeling (Sentinel-2, Landsat-8, Sample FortyGuard).
+
+
+================================================================================
+14. SCOPE BOUNDARIES: FEATURES EXPLICITLY EXCLUDED FROM MVP
+================================================================================
+
+- NO User authentication, passwords, or signup forms.
+- NO Relational database setup (PostgreSQL / PostGIS).
+- NO Black-box deep learning or unexplainable neural networks.
+- NO Global coordinate search or multi-region selector (focus on 1 high-impact study area).
+- NO Live satellite streaming connections that risk failing during demo Wi-Fi.
+- NO Complex administrative billing or RBAC role management.
+
+
+================================================================================
+15. ARCHITECTURAL SUMMARY: CHANGES, INVARIANTS, AND GUARDRAILS
+================================================================================
+
+A. What Changed:
+- Corrected sensor allocation: Sentinel-2 is used for optical/vegetation disturbance;
+  Landsat 8/9 is used for thermal LST.
+- Implemented Zonal Statistics to handle the 10m vs 30m resolution gap.
+- Modularized FortyGuard microclimate layer with clear sample attribution.
+
+B. What Stays the Same:
+- Primary goal: Pinpoint and prioritize high-risk environmental zones.
+- Frontend: React 18 + Vite + TypeScript + Leaflet + Tailwind CSS.
+- Transparent 0-100 scoring math with LOW, MEDIUM, HIGH, CRITICAL tiers.
+
+C. Exact Datasets Needed for Milestone 2:
+1. Sentinel-2 T1 (Red + NIR bands, cloud-free)
+2. Sentinel-2 T2 (Red + NIR bands, cloud-free)
+3. Landsat 8/9 T2 (Band 10 / Surface Temperature product)
+4. Surrounding Vegetated Baseline LST value
+5. Sample FortyGuard micro-thermal grid (JSON)
+
+D. Critical Mistakes to Avoid:
+- Never claim Sentinel-2 has a thermal infrared band.
+- Never fake private API endpoints.
+- Never hide how risk scores are calculated.
+
+================================================================================
+END OF GEOSENTINEL ARCHITECTURE SPECIFICATION
+================================================================================

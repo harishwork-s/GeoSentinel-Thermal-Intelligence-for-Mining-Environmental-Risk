@@ -1,0 +1,6 @@
+{
+  "name": "GeoSentinel",
+  "description": "Thermal intelligence and land-use risk analysis platform for mining and environmental monitoring.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
